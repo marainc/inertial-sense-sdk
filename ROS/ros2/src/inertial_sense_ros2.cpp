@@ -1281,11 +1281,12 @@ void InertialSenseROS::INS4_callback(eDataIDs DID, const ins_4_t *const msg)
 
         if (rs_.odom_ins_ned.enabled)
         {
-            if (!refLLA_valid)
+            static bool refLLA_warned = false;
+            if (!refLLA_valid && !refLLA_warned)
             {
-                RCLCPP_INFO(rclcpp::get_logger("wait_for_reflla"),"InertialSenseROS: Waiting for refLLA to be received from IMX");
+                RCLCPP_WARN(rclcpp::get_logger("wait_for_reflla"),"InertialSenseROS: refLLA not set, using default (0,0,0) - positions will be relative to equator");
+                refLLA_warned = true;
             }
-            else
             {
                 ixVector4 qn2b;
                 ixMatrix3 Rb2n, Re2n, buf;
@@ -1368,11 +1369,12 @@ void InertialSenseROS::INS4_callback(eDataIDs DID, const ins_4_t *const msg)
 
         if (rs_.odom_ins_enu.enabled)
         {
-            if (!refLLA_valid)
+            static bool refLLA_warned_enu = false;
+            if (!refLLA_valid && !refLLA_warned_enu)
             {
-                RCLCPP_INFO(rclcpp::get_logger("wait_for_reflla"),"InertialSenseROS: Waiting for refLLA to be received from IMX");
+                RCLCPP_WARN(rclcpp::get_logger("wait_for_reflla"),"InertialSenseROS: refLLA not set for ENU, using default (0,0,0)");
+                refLLA_warned_enu = true;
             }
-            else
             {
                 ixVector4 qn2b, qn2enu, qe2enu, qenu2b;
                 ixMatrix3 Rb2enu, Re2enu, buf;
@@ -1603,6 +1605,36 @@ void InertialSenseROS::GPS_pos_callback(eDataIDs DID, const gps_pos_t *const msg
             msg_gps2.vacc = msg->vAcc;
             msg_gps2.pdop = msg->pDop;
             publishGPS2();
+        }
+        // Publish GPS2 NavSatFix
+        if (rs_.gps2_navsatfix.enabled && msg->status & GPS_STATUS_FIX_MASK)
+        {
+            sensor_msgs::msg::NavSatFix msg_NavSatFix2;
+            msg_NavSatFix2.header.stamp = ros_time_from_week_and_tow(msg->week, msg->timeOfWeekMs / 1.0e3);
+            msg_NavSatFix2.header.frame_id = frame_id_;
+            msg_NavSatFix2.status.status = -1;
+            if (msg->status & GPS_STATUS_FIX_MASK >= GPS_STATUS_FIX_2D)
+            {
+                msg_NavSatFix2.status.status = NavSatFixStatusFixType::STATUS_FIX;
+            }
+            if (msg->status & GPS_STATUS_FIX_SBAS)
+            {
+                msg_NavSatFix2.status.status = NavSatFixStatusFixType::STATUS_SBAS_FIX;
+            }
+            if (msg->status & GPS_STATUS_FIX_MASK >= GPS_STATUS_FIX_RTK_SINGLE)
+            {
+                msg_NavSatFix2.status.status = NavSatFixStatusFixType::STATUS_GBAS_FIX;
+            }
+            msg_NavSatFix2.latitude = msg->lla[0];
+            msg_NavSatFix2.longitude = msg->lla[1];
+            msg_NavSatFix2.altitude = msg->lla[2];
+            const double varH2 = pow(msg->hAcc / 1000.0, 2);
+            const double varV2 = pow(msg->vAcc / 1000.0, 2);
+            msg_NavSatFix2.position_covariance[0] = varH2;
+            msg_NavSatFix2.position_covariance[4] = varH2;
+            msg_NavSatFix2.position_covariance[8] = varV2;
+            msg_NavSatFix2.position_covariance_type = COVARIANCE_TYPE_DIAGONAL_KNOWN;
+            rs_.gps2_navsatfix.pub_nsf->publish(msg_NavSatFix2);
         }
         break;
     }
