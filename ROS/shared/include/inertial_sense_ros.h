@@ -175,6 +175,7 @@ public:
 
     bool flashConfigStreaming_ = false;
     bool factory_reset_ = false;        // Apply factory reset on startup
+    bool soft_reset_ = false;           // Apply soft reset on startup (reboot device)
 
     // Serial Port Configuration
     std::vector<std::string> ports_;    // a collection of ports which will be attempted, in order until a connection is made
@@ -417,8 +418,12 @@ public:
                                //  If this number is 0, then we have not yet got a fix
     uint64_t GPS_week_ = 0;    // Week number to start of GPS_towOffset_ in GPS time
     // Time sync variables
-    double INS_local_offset_ = 0.0;  // Current estimate of the uINS start time in ROS time seconds
-    bool got_first_message_ = false; // Flag to capture first uINS start time guess
+    double INS_local_offset_ = 0.0;  // Current estimate of the uINS start time in ROS time seconds (for week/tow messages)
+    bool got_first_message_ = false; // Flag to capture first uINS start time guess (for week/tow messages)
+
+    // Separate tracking for device start time messages (PIMU, mag, baro)
+    double start_time_local_offset_ = 0.0;
+    bool got_first_start_time_message_ = false;
 
     /**
      * @brief LD2Cov

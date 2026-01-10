@@ -103,6 +103,21 @@ void InertialSenseROS::initializeIS(bool configFlashParameters)
         }
     }
 
+    if (soft_reset_)
+    {
+        if (connect())
+        {   // Apply soft reset (reboot device)
+            RCLCPP_INFO(rclcpp::get_logger("soft_reset"), "InertialSenseROS2: Applying soft reset (rebooting device).");
+            IS_.StopBroadcasts(true);
+            system_command_t reset_command;
+            reset_command.command = 99;
+            reset_command.invCommand = ~reset_command.command;
+            IS_.SendData(DID_SYS_CMD, reinterpret_cast<uint8_t *>(&reset_command), sizeof(system_command_t), 0);
+            sleep(3);
+            IS_.Close();
+        }
+    }
+
     if (connect())
     {
         // Check protocol and firmware version
@@ -246,6 +261,9 @@ void InertialSenseROS::load_params(YAML::Node &node)
 
     bool factory_reset = nh_->declare_parameter<bool>("factory_reset", false);
     ph.nodeParam("factory_reset", factory_reset_, factory_reset);
+
+    bool soft_reset = nh_->declare_parameter<bool>("soft_reset", false);
+    ph.nodeParam("soft_reset", soft_reset_, soft_reset);
 
     int baud_rate = nh_->declare_parameter<int>("baudrate", 921600);
     ph.nodeParam("baudrate", baudrate_, baud_rate);
@@ -2488,8 +2506,9 @@ bool InertialSenseROS::update_firmware_srv_callback(inertial_sense_ros2::srv::Fi
 rclcpp::Time InertialSenseROS::ros_time_from_week_and_tow(const uint32_t week, const double timeOfWeek)
 {
     rclcpp::Time rostime(0, 0);
-    //  If we have a GPS fix, then use it to set timestamp
-    if (abs(GPS_towOffset_) > 0.001)
+    //  If we have a valid GPS fix, then use it to set timestamp
+    //  Bug fix: Also check week > 0 to ensure we have valid GPS data
+    if (abs(GPS_towOffset_) > 0.001 && week > 0)
     {
         uint64_t sec = UNIX_TO_GPS_OFFSET + floor(timeOfWeek) + week * 7 * 24 * 3600;
         uint64_t nsec = (timeOfWeek - floor(timeOfWeek)) * 1e9;
@@ -2518,8 +2537,14 @@ rclcpp::Time InertialSenseROS::ros_time_from_start_time(const double time)
 {
     rclcpp::Time rostime(0, 0);
 
-    //  If we have a GPS fix, then use it to set timestamp
-    if (abs(GPS_towOffset_) > 0.001)
+    // Debug counter for occasional logging (disabled)
+    // static int debug_counter = 0;
+    // debug_counter++;
+
+    //  If we have a valid GPS fix, then use it to set timestamp
+    //  Bug fix: Also check GPS_week_ > 0 to ensure we have a valid GPS lock
+    //  GPS_towOffset_ can be non-zero before GPS lock, causing invalid timestamps
+    if (abs(GPS_towOffset_) > 0.001 && GPS_week_ > 0)
     {
         double timeOfWeek = time + GPS_towOffset_;
         uint64_t sec = (uint64_t)(UNIX_TO_GPS_OFFSET + floor(timeOfWeek) + GPS_week_ * 7 * 24 * 3600);
@@ -2528,19 +2553,23 @@ rclcpp::Time InertialSenseROS::ros_time_from_start_time(const double time)
     }
     else
     {
-        // Otherwise, estimate the IMX boot time and offset the messages
-        if (!got_first_message_)
+        // Use separate offset tracking for start_time messages (PIMU, mag, baro)
+        // to avoid conflicts with week/tow messages that use different time bases
+        if (!got_first_start_time_message_)
         {
-            got_first_message_ = true;
-            INS_local_offset_ = nh_->now().seconds() - time;
+            got_first_start_time_message_ = true;
+            start_time_local_offset_ = nh_->now().seconds() - time;
         }
         else // low-pass filter offset to account for drift
         {
             double y_offset = nh_->now().seconds() - time;
-            INS_local_offset_ = 0.005 * y_offset + 0.995 * INS_local_offset_;
+            start_time_local_offset_ = 0.005 * y_offset + 0.995 * start_time_local_offset_;
         }
         // Publish with ROS time
-        rostime = rclcpp::Time(INS_local_offset_ + time);
+        // IMPORTANT: rclcpp::Time(int64_t) interprets as nanoseconds, so we must convert
+        double total_seconds = start_time_local_offset_ + time;
+        int64_t total_nanoseconds = static_cast<int64_t>(total_seconds * 1e9);
+        rostime = rclcpp::Time(total_nanoseconds);
     }
     return rostime;
 }
