@@ -2510,8 +2510,8 @@ rclcpp::Time InertialSenseROS::ros_time_from_week_and_tow(const uint32_t week, c
     //  Bug fix: Also check week > 0 to ensure we have valid GPS data
     if (abs(GPS_towOffset_) > 0.001 && week > 0)
     {
-        uint64_t sec = UNIX_TO_GPS_OFFSET + floor(timeOfWeek) + week * 7 * 24 * 3600;
-        uint64_t nsec = (timeOfWeek - floor(timeOfWeek)) * 1e9;
+        int32_t sec = static_cast<int32_t>(UNIX_TO_GPS_OFFSET + floor(timeOfWeek) + week * 7 * 24 * 3600);
+        uint32_t nsec = static_cast<uint32_t>((timeOfWeek - floor(timeOfWeek)) * 1e9);
         rostime = rclcpp::Time(sec, nsec);
     }
     else
@@ -2528,7 +2528,10 @@ rclcpp::Time InertialSenseROS::ros_time_from_week_and_tow(const uint32_t week, c
             INS_local_offset_ = 0.005 * y_offset + 0.995 * INS_local_offset_;
         }
         // Publish with ROS time
-        rostime = rclcpp::Time(INS_local_offset_ + timeOfWeek);
+        // IMPORTANT: rclcpp::Time(int64_t) interprets as nanoseconds, so we must convert
+        double total_seconds = INS_local_offset_ + timeOfWeek;
+        int64_t total_nanoseconds = static_cast<int64_t>(total_seconds * 1e9);
+        rostime = rclcpp::Time(total_nanoseconds);
     }
     return rostime;
 }
@@ -2547,8 +2550,8 @@ rclcpp::Time InertialSenseROS::ros_time_from_start_time(const double time)
     if (abs(GPS_towOffset_) > 0.001 && GPS_week_ > 0)
     {
         double timeOfWeek = time + GPS_towOffset_;
-        uint64_t sec = (uint64_t)(UNIX_TO_GPS_OFFSET + floor(timeOfWeek) + GPS_week_ * 7 * 24 * 3600);
-        uint64_t nsec = (uint64_t)((timeOfWeek - floor(timeOfWeek)) * 1.0e9);
+        int32_t sec = static_cast<int32_t>(UNIX_TO_GPS_OFFSET + floor(timeOfWeek) + GPS_week_ * 7 * 24 * 3600);
+        uint32_t nsec = static_cast<uint32_t>((timeOfWeek - floor(timeOfWeek)) * 1.0e9);
         rostime = rclcpp::Time(sec, nsec);
     }
     else
